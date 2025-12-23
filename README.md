@@ -178,16 +178,3 @@ docker-compose down -v
 docker-compose up -d
 alembic upgrade head
 ```
-
-## Next Steps
-
-The authentication system is complete! Next features to implement:
-- Group management endpoints (create, join, leave)
-- Task management endpoints (create, update, list)
-- Completion tracking (mark tasks as done)
-- Rotation logic (whose turn is it?)
-- User profile management
-
-## License
-
-MIT
