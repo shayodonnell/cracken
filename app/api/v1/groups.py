@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, insert
+from sqlalchemy import select, insert, delete, update, func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -20,6 +20,60 @@ from app.schemas.group import (
 from app.utils.invite_code import generate_invite_code
 
 router = APIRouter()
+
+
+def get_member_count(group_id: int, db: Session) -> int:
+    """Get the number of members in a group."""
+    count = db.execute(
+        select(func.count()).select_from(group_members).where(
+            group_members.c.group_id == group_id
+        )
+    ).scalar()
+    return count or 0
+
+
+def promote_oldest_member(group_id: int, exclude_user_id: int, db: Session) -> int:
+    """
+    Promote the oldest member to admin.
+
+    Args:
+        group_id: ID of the group
+        exclude_user_id: User ID to exclude from promotion (the leaving admin)
+        db: Database session
+
+    Returns:
+        User ID of the new admin, or None if no other members exist
+    """
+    # Find oldest member (excluding current admin)
+    oldest = db.execute(
+        select(group_members.c.user_id)
+        .where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id != exclude_user_id
+        )
+        .order_by(group_members.c.joined_at.asc())
+        .limit(1)
+    ).scalar()
+
+    if not oldest:
+        return None
+
+    # Update role to admin
+    db.execute(
+        update(group_members)
+        .where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == oldest
+        )
+        .values(role="admin")
+    )
+
+    # Update group creator
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if group:
+        group.created_by = oldest
+
+    return oldest
 
 
 def verify_group_membership(group_id: int, user_id: int, db: Session) -> Group:
@@ -287,20 +341,21 @@ def list_group_members(
     return members
 
 
-@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_group(
+@router.delete("/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_group(
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Delete a group.
+    Leave a group (self-removal).
 
-    Only the group creator can delete the group.
-    All associated tasks and completions will be deleted (cascade).
+    Any member can leave a group. If the leaving member is an admin,
+    the oldest remaining member is promoted to admin. If the leaving member
+    is the last member, the group is automatically deleted.
 
     Args:
-        group_id: ID of the group to delete
+        group_id: ID of the group to leave
         current_user: Authenticated user
         db: Database session
 
@@ -308,26 +363,122 @@ def delete_group(
         None (204 No Content)
 
     Raises:
-        HTTPException: 404 if group not found, 403 if not the creator
+        HTTPException: 404 if group not found, 403 if not a member
     """
-    # Get group
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Group not found"
-        )
+    # Verify group exists and user is a member
+    group = verify_group_membership(group_id, current_user.id, db)
 
-    # Verify user is the creator
-    if group.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the group creator can delete the group"
-        )
+    # Check member count
+    member_count = get_member_count(group_id, db)
 
-    # Delete group (cascades to group_members, tasks, and completions)
-    db.delete(group)
+    if member_count == 1:
+        # Last member leaving - delete the group
+        db.delete(group)
+        db.commit()
+        return None
+
+    # Check if current user is admin
+    current_role = db.execute(
+        select(group_members.c.role).where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == current_user.id
+        )
+    ).scalar()
+
+    # If admin is leaving, promote oldest member
+    if current_role == "admin":
+        promote_oldest_member(group_id, current_user.id, db)
+
+    # Remove current user from group
+    db.execute(
+        delete(group_members).where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == current_user.id
+        )
+    )
     db.commit()
 
-    # No content returned for 204
+    return None
+
+
+@router.delete("/{group_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(
+    group_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Remove a member from a group (admin-only).
+
+    Only admins can remove members. If the admin removes themselves,
+    admin succession occurs. If removing the last member would empty
+    the group, the group is automatically deleted.
+
+    Args:
+        group_id: ID of the group
+        user_id: ID of the user to remove
+        current_user: Authenticated user (must be admin)
+        db: Database session
+
+    Returns:
+        None (204 No Content)
+
+    Raises:
+        HTTPException: 404 if group not found, 403 if not admin, 404 if target user not a member
+    """
+    # Verify group exists and current user is a member
+    group = verify_group_membership(group_id, current_user.id, db)
+
+    # Verify current user is an admin
+    current_role = db.execute(
+        select(group_members.c.role).where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == current_user.id
+        )
+    ).scalar()
+
+    if current_role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only group admins can remove members"
+        )
+
+    # Verify target user is a member of the group
+    target_membership = db.execute(
+        select(group_members.c.user_id).where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == user_id
+        )
+    ).scalar()
+
+    if not target_membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not a member of this group"
+        )
+
+    # If admin is removing themselves, use leave logic
+    if user_id == current_user.id:
+        # Check member count
+        member_count = get_member_count(group_id, db)
+
+        if member_count == 1:
+            # Last member leaving - delete the group
+            db.delete(group)
+            db.commit()
+            return None
+
+        # Admin removing self - promote oldest member
+        promote_oldest_member(group_id, current_user.id, db)
+
+    # Remove the target user from group
+    db.execute(
+        delete(group_members).where(
+            group_members.c.group_id == group_id,
+            group_members.c.user_id == user_id
+        )
+    )
+    db.commit()
+
     return None
