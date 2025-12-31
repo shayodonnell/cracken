@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api.v1 import auth
+from app.api.v1 import auth, groups
 from app.config import settings
 
 # Create FastAPI application instance
@@ -16,6 +16,12 @@ app.include_router(
     auth.router,
     prefix=f"{settings.API_V1_PREFIX}/auth",
     tags=["Authentication"]
+)
+
+app.include_router(
+    groups.router,
+    prefix=f"{settings.API_V1_PREFIX}/groups",
+    tags=["Groups"]
 )
 
 
