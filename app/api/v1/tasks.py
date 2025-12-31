@@ -3,22 +3,22 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.database import get_db
-from app.models.task import Task
+from app.models.task import Task, task_assignments
 from app.models.group import Group, group_members
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse
+from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskAssignmentUpdate
 
 router = APIRouter()
 
 
 def verify_group_membership_for_tasks(group_id: int, user_id: int, db: Session) -> Group:
     """
-    Verify user is a member of a group.
+    Verify user is a member of a group and return the group with members loaded.
 
     Args:
         group_id: Group ID
@@ -26,13 +26,18 @@ def verify_group_membership_for_tasks(group_id: int, user_id: int, db: Session) 
         db: Database session
 
     Returns:
-        Group object if user is a member
+        Group object with members relationship loaded
 
     Raises:
         HTTPException: 404 if group not found, 403 if not a member
     """
-    # Check group exists
-    group = db.query(Group).filter(Group.id == group_id).first()
+    from sqlalchemy.orm import selectinload
+
+    # Load group with members for validation and default assignments
+    group = db.query(Group).options(
+        selectinload(Group.members)
+    ).filter(Group.id == group_id).first()
+
     if not group:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -92,22 +97,44 @@ def create_task(
     """
     Create a new task in a group.
 
-    Any member of the group can create tasks.
+    Any member of the group can create tasks. By default, tasks are assigned
+    to all current group members. Optionally specify assigned_user_ids to
+    assign to specific members only.
 
     Args:
         group_id: ID of the group
-        task_data: Task creation data (name, emoji, category)
+        task_data: Task creation data (name, emoji, category, assigned_user_ids)
         current_user: Authenticated user
         db: Database session
 
     Returns:
-        Created task with all fields
+        Created task with assigned users
 
     Raises:
-        HTTPException: 404 if group not found, 403 if not a member
+        HTTPException: 404 if group not found, 403 if not a member,
+                      400 if assigned_user_ids contains non-members
     """
-    # Verify membership
-    verify_group_membership_for_tasks(group_id, current_user.id, db)
+    # Verify membership and get group with members
+    group = verify_group_membership_for_tasks(group_id, current_user.id, db)
+
+    # Determine who to assign the task to
+    if task_data.assigned_user_ids is None:
+        # Default: assign to all current group members
+        assigned_user_ids = [member.id for member in group.members]
+    else:
+        # Use provided list (can be empty)
+        assigned_user_ids = task_data.assigned_user_ids
+
+    # Validate: all assigned users must be group members
+    if assigned_user_ids:
+        group_member_ids = {member.id for member in group.members}
+        invalid_ids = set(assigned_user_ids) - group_member_ids
+
+        if invalid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Users {list(invalid_ids)} are not members of this group"
+            )
 
     # Create task
     new_task = Task(
@@ -118,6 +145,18 @@ def create_task(
     )
 
     db.add(new_task)
+    db.flush()  # Get task.id before adding assignments
+
+    # Add assignments
+    if assigned_user_ids:
+        for user_id in assigned_user_ids:
+            db.execute(
+                task_assignments.insert().values(
+                    task_id=new_task.id,
+                    user_id=user_id
+                )
+            )
+
     db.commit()
     db.refresh(new_task)
 
@@ -251,6 +290,82 @@ def update_task(
     update_data = task_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(task, field, value)
+
+    db.commit()
+    db.refresh(task)
+
+    return task
+
+
+@router.put("/{task_id}/assignments", response_model=TaskResponse)
+def update_task_assignments(
+    group_id: int,
+    task_id: int,
+    assignment_data: TaskAssignmentUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update which users are assigned to a task.
+
+    Any member can update task assignments. This completely replaces
+    existing assignments with the new list.
+
+    Args:
+        group_id: ID of the group
+        task_id: ID of the task
+        assignment_data: New list of user IDs to assign
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        Updated task with new assignments
+
+    Raises:
+        HTTPException: 404 if group/task not found, 403 if not a member,
+                      400 if assigned_user_ids contains non-members
+    """
+    # Verify membership and get group with members
+    group = verify_group_membership_for_tasks(group_id, current_user.id, db)
+
+    # Get task
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.group_id == group_id
+    ).first()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+
+    # Validate: all assigned users must be group members
+    assigned_user_ids = assignment_data.assigned_user_ids
+    if assigned_user_ids:
+        group_member_ids = {member.id for member in group.members}
+        invalid_ids = set(assigned_user_ids) - group_member_ids
+
+        if invalid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Users {list(invalid_ids)} are not members of this group"
+            )
+
+    # Delete all existing assignments
+    db.execute(
+        delete(task_assignments).where(task_assignments.c.task_id == task_id)
+    )
+
+    # Add new assignments
+    if assigned_user_ids:
+        for user_id in assigned_user_ids:
+            db.execute(
+                task_assignments.insert().values(
+                    task_id=task_id,
+                    user_id=user_id
+                )
+            )
 
     db.commit()
     db.refresh(task)

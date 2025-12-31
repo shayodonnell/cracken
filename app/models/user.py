@@ -24,3 +24,10 @@ class User(Base):
 
     # One-to-many with completions
     completions = relationship("Completion", back_populates="user")
+
+    # Many-to-many with tasks (assigned tasks)
+    assigned_tasks = relationship(
+        "Task",
+        secondary="task_assignments",  # Reference by string to avoid circular import
+        back_populates="assigned_users"
+    )
