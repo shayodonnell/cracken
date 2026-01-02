@@ -31,7 +31,7 @@ app.include_router(
 )
 
 app.include_router(
-    tasks.router,
+    completions.router,
     prefix=f"{settings.API_V1_PREFIX}/groups/{{group_id}}/completions",
     tags=["completions"]
 
