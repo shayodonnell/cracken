@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api.v1 import auth, groups, tasks
+from app.api.v1 import auth, groups, tasks, completions
 from app.config import settings
 
 # Create FastAPI application instance
@@ -28,6 +28,13 @@ app.include_router(
     tasks.router,
     prefix=f"{settings.API_V1_PREFIX}/groups/{{group_id}}/tasks",
     tags=["Tasks"]
+)
+
+app.include_router(
+    tasks.router,
+    prefix=f"{settings.API_V1_PREFIX}/groups/{{group_id}}/completions",
+    tags=["completions"]
+
 )
 
 
