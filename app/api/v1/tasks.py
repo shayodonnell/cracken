@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_group_member
 from app.database import get_db
 from app.models.task import Task, task_assignments
 from app.models.group import Group, group_members
@@ -14,52 +14,6 @@ from app.models.user import User
 from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskAssignmentUpdate
 
 router = APIRouter()
-
-
-def verify_group_membership_for_tasks(group_id: int, user_id: int, db: Session) -> Group:
-    """
-    Verify user is a member of a group and return the group with members loaded.
-
-    Args:
-        group_id: Group ID
-        user_id: User ID
-        db: Database session
-
-    Returns:
-        Group object with members relationship loaded
-
-    Raises:
-        HTTPException: 404 if group not found, 403 if not a member
-    """
-    from sqlalchemy.orm import selectinload
-
-    # Load group with members for validation and default assignments
-    group = db.query(Group).options(
-        selectinload(Group.members)
-    ).filter(Group.id == group_id).first()
-
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Group not found"
-        )
-
-    # Check membership
-    membership = db.execute(
-        select(group_members).where(
-            group_members.c.group_id == group_id,
-            group_members.c.user_id == user_id
-        )
-    ).first()
-
-    if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a member of this group"
-        )
-
-    return group
-
 
 def verify_admin_role(group_id: int, user_id: int, db: Session) -> None:
     """
@@ -91,6 +45,7 @@ def verify_admin_role(group_id: int, user_id: int, db: Session) -> None:
 def create_task(
     group_id: int,
     task_data: TaskCreate,
+    group: Group = Depends(get_current_group_member),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -114,9 +69,6 @@ def create_task(
         HTTPException: 404 if group not found, 403 if not a member,
                       400 if assigned_user_ids contains non-members
     """
-    # Verify membership and get group with members
-    group = verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Determine who to assign the task to
     if task_data.assigned_user_ids is None:
         # Default: assign to all current group members
@@ -167,7 +119,7 @@ def create_task(
 def list_tasks(
     group_id: int,
     include_inactive: bool = Query(False, description="Include soft-deleted tasks"),
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -188,9 +140,6 @@ def list_tasks(
     Raises:
         HTTPException: 404 if group not found, 403 if not a member
     """
-    # Verify membership
-    verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Build query
     query = db.query(Task).filter(Task.group_id == group_id)
 
@@ -208,7 +157,7 @@ def list_tasks(
 def get_task(
     group_id: int,
     task_id: int,
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -226,9 +175,6 @@ def get_task(
     Raises:
         HTTPException: 404 if group/task not found, 403 if not a member
     """
-    # Verify membership
-    verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Get task
     task = db.query(Task).filter(
         Task.id == task_id,
@@ -249,7 +195,7 @@ def update_task(
     group_id: int,
     task_id: int,
     task_data: TaskUpdate,
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -271,9 +217,6 @@ def update_task(
     Raises:
         HTTPException: 404 if group/task not found, 403 if not a member
     """
-    # Verify membership
-    verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Get task
     task = db.query(Task).filter(
         Task.id == task_id,
@@ -302,7 +245,7 @@ def update_task_assignments(
     group_id: int,
     task_id: int,
     assignment_data: TaskAssignmentUpdate,
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -325,9 +268,6 @@ def update_task_assignments(
         HTTPException: 404 if group/task not found, 403 if not a member,
                       400 if assigned_user_ids contains non-members
     """
-    # Verify membership and get group with members
-    group = verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Get task
     task = db.query(Task).filter(
         Task.id == task_id,
@@ -377,6 +317,7 @@ def update_task_assignments(
 def delete_task(
     group_id: int,
     task_id: int,
+    group: Group = Depends(get_current_group_member),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -399,9 +340,6 @@ def delete_task(
     Raises:
         HTTPException: 404 if group/task not found, 403 if not admin
     """
-    # Verify membership
-    verify_group_membership_for_tasks(group_id, current_user.id, db)
-
     # Verify admin role
     verify_admin_role(group_id, current_user.id, db)
 
