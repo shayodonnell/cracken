@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.security import decode_token
 from app.database import get_db
 from app.models.user import User
+from app.models.group import Group
 
 # OAuth2 scheme for token authentication
 # tokenUrl points to the login endpoint
@@ -60,3 +61,29 @@ def get_current_user(
         raise credentials_exception
 
     return user
+
+def get_current_group_member(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Group:
+    """
+    Verifies that the current user is a member of the group_id provided in the path.
+    Returns the Group object if valid.
+    """
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Group not found"
+        )
+    
+    # Check if user is in the group's members list
+    if current_user not in group.members:
+        raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not a member of this group"
+    )
+
+    return group
+
