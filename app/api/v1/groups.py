@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, insert, delete, update, func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_group_member
 from app.database import get_db
 from app.models.group import Group, group_members
 from app.models.user import User
@@ -74,46 +74,6 @@ def promote_oldest_member(group_id: int, exclude_user_id: int, db: Session) -> i
         group.created_by = oldest
 
     return oldest
-
-
-def verify_group_membership(group_id: int, user_id: int, db: Session) -> Group:
-    """
-    Verify that a user is a member of a group and return the group.
-
-    Args:
-        group_id: ID of the group
-        user_id: ID of the user
-        db: Database session
-
-    Returns:
-        Group object if user is a member
-
-    Raises:
-        HTTPException: 404 if group not found, 403 if user not a member
-    """
-    # Get group
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Group not found"
-        )
-
-    # Check membership
-    membership = db.execute(
-        select(group_members).where(
-            group_members.c.group_id == group_id,
-            group_members.c.user_id == user_id
-        )
-    ).first()
-
-    if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a member of this group"
-        )
-
-    return group
 
 
 @router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
@@ -209,7 +169,7 @@ def list_groups(
 @router.get("/{group_id}", response_model=GroupResponse)
 def get_group(
     group_id: int,
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -226,7 +186,6 @@ def get_group(
     Raises:
         HTTPException: 404 if group not found, 403 if not a member
     """
-    group = verify_group_membership(group_id, current_user.id, db)
     return group
 
 
@@ -294,7 +253,7 @@ def join_group(
 @router.get("/{group_id}/members", response_model=List[GroupMemberResponse])
 def list_group_members(
     group_id: int,
-    current_user: User = Depends(get_current_user),
+    group: Group = Depends(get_current_group_member),
     db: Session = Depends(get_db)
 ):
     """
@@ -311,9 +270,6 @@ def list_group_members(
     Raises:
         HTTPException: 404 if group not found, 403 if not a member
     """
-    # Verify membership
-    verify_group_membership(group_id, current_user.id, db)
-
     # Query members with their join dates
     members_query = db.query(
         User.id,
@@ -344,6 +300,7 @@ def list_group_members(
 @router.delete("/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
 def leave_group(
     group_id: int,
+    group: Group = Depends(get_current_group_member),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -365,9 +322,6 @@ def leave_group(
     Raises:
         HTTPException: 404 if group not found, 403 if not a member
     """
-    # Verify group exists and user is a member
-    group = verify_group_membership(group_id, current_user.id, db)
-
     # Check member count
     member_count = get_member_count(group_id, db)
 
@@ -405,6 +359,7 @@ def leave_group(
 def remove_member(
     group_id: int,
     user_id: int,
+    group: Group = Depends(get_current_group_member),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -427,9 +382,6 @@ def remove_member(
     Raises:
         HTTPException: 404 if group not found, 403 if not admin, 404 if target user not a member
     """
-    # Verify group exists and current user is a member
-    group = verify_group_membership(group_id, current_user.id, db)
-
     # Verify current user is an admin
     current_role = db.execute(
         select(group_members.c.role).where(
