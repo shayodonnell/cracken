@@ -13,7 +13,14 @@ from app.schemas.user import UserCreate, UserResponse, Token
 router = APIRouter()
 
 
-@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", 
+    response_model=Token, 
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"description": "Email already registered"}
+    }
+)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """
     Register a new user account.
@@ -53,7 +60,13 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.post("/login", response_model=Token)
+@router.post(
+    "/login", 
+    response_model=Token,
+    responses={
+        401: {"description": "Incorrect email or password"}
+    }
+)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
@@ -88,7 +101,13 @@ def login(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get(
+    "/me", 
+    response_model=UserResponse,
+    responses={
+        401: {"description": "Could not validate credentials"}
+    }
+)
 def get_current_user_info(current_user: User = Depends(get_current_user)):
     """
     Get current authenticated user information.

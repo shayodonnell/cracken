@@ -76,7 +76,15 @@ def promote_oldest_member(group_id: int, exclude_user_id: int, db: Session) -> i
     return oldest
 
 
-@router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=GroupResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        500: {"description": "Failed to generate unique invite code"}
+    }
+)
 def create_group(
     group_data: GroupCreate,
     current_user: User = Depends(get_current_user),
@@ -141,7 +149,13 @@ def create_group(
     return new_group
 
 
-@router.get("", response_model=List[GroupResponse])
+@router.get(
+    "", 
+    response_model=List[GroupResponse],
+    responses={
+        401: {"description": "Could not validate credentials"}
+    }
+)
 def list_groups(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -166,7 +180,15 @@ def list_groups(
     return groups
 
 
-@router.get("/{group_id}", response_model=GroupResponse)
+@router.get(
+    "/{group_id}", 
+    response_model=GroupResponse,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"}
+    }
+)
 def get_group(
     group_id: int,
     group: Group = Depends(get_current_group_member),
@@ -189,7 +211,16 @@ def get_group(
     return group
 
 
-@router.post("/join", response_model=GroupResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/join",
+    response_model=GroupResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        404: {"description": "Invalid invite code"},
+        400: {"description": "You are already a member of this group"}
+    }
+)
 def join_group(
     join_data: GroupJoin,
     current_user: User = Depends(get_current_user),
@@ -250,7 +281,15 @@ def join_group(
     return group
 
 
-@router.get("/{group_id}/members", response_model=List[GroupMemberResponse])
+@router.get(
+    "/{group_id}/members",
+    response_model=List[GroupMemberResponse],
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"}
+    }
+)
 def list_group_members(
     group_id: int,
     group: Group = Depends(get_current_group_member),
@@ -297,7 +336,15 @@ def list_group_members(
     return members
 
 
-@router.delete("/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{group_id}/leave",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"}
+    }
+)
 def leave_group(
     group_id: int,
     group: Group = Depends(get_current_group_member),
@@ -355,7 +402,15 @@ def leave_group(
     return None
 
 
-@router.delete("/{group_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{group_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group / Only group admins can remove members"},
+        404: {"description": "Group not found / User is not a member of this group"}
+    }
+)
 def remove_member(
     group_id: int,
     user_id: int,

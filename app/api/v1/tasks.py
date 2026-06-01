@@ -41,7 +41,17 @@ def verify_admin_role(group_id: int, user_id: int, db: Session) -> None:
         )
 
 
-@router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"},
+        400: {"description": "Assigned user IDs are not members of this group"}
+    }
+)
 def create_task(
     group_id: int,
     task_data: TaskCreate,
@@ -115,7 +125,15 @@ def create_task(
     return new_task
 
 
-@router.get("", response_model=List[TaskResponse])
+@router.get(
+    "",
+    response_model=List[TaskResponse],
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"}
+    }
+)
 def list_tasks(
     group_id: int,
     include_inactive: bool = Query(False, description="Include soft-deleted tasks"),
@@ -153,7 +171,15 @@ def list_tasks(
     return tasks
 
 
-@router.get("/{task_id}", response_model=TaskResponse)
+@router.get(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found / Task not found"}
+    }
+)
 def get_task(
     group_id: int,
     task_id: int,
@@ -190,7 +216,15 @@ def get_task(
     return task
 
 
-@router.patch("/{task_id}", response_model=TaskResponse)
+@router.patch(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found / Task not found"}
+    }
+)
 def update_task(
     group_id: int,
     task_id: int,
@@ -240,7 +274,16 @@ def update_task(
     return task
 
 
-@router.put("/{task_id}/assignments", response_model=TaskResponse)
+@router.put(
+    "/{task_id}/assignments",
+    response_model=TaskResponse,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found / Task not found"},
+        400: {"description": "Assigned user IDs are not members of this group"}
+    }
+)
 def update_task_assignments(
     group_id: int,
     task_id: int,
@@ -313,7 +356,15 @@ def update_task_assignments(
     return task
 
 
-@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group / Only group admins can perform this action"},
+        404: {"description": "Group not found / Task not found"}
+    }
+)
 def delete_task(
     group_id: int,
     task_id: int,

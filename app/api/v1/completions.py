@@ -16,7 +16,17 @@ from app.schemas.completion import CompletionResponse, CompletionWithUser
 router = APIRouter()
 
 
-@router.post("/{task_id}", response_model=CompletionResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{task_id}",
+    response_model=CompletionResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found / Task not found"},
+        400: {"description": "Cannot complete an inactive task"}
+    }
+)
 def mark_task_complete(
     group_id: int,
     task_id: int,
@@ -78,7 +88,15 @@ def mark_task_complete(
     return completion
 
 
-@router.get("", response_model=List[CompletionWithUser])
+@router.get(
+    "",
+    response_model=List[CompletionWithUser],
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found"}
+    }
+)
 def list_group_completions(
     group_id: int,
     task_id: Optional[int] = Query(None, description="Filter by specific task"),
@@ -143,7 +161,15 @@ def list_group_completions(
     return completions_with_users
 
 
-@router.get("/tasks/{task_id}", response_model=List[CompletionWithUser])
+@router.get(
+    "/tasks/{task_id}",
+    response_model=List[CompletionWithUser],
+    responses={
+        401: {"description": "Could not validate credentials"},
+        403: {"description": "Not a member of this group"},
+        404: {"description": "Group not found / Task not found"}
+    }
+)
 def get_task_completion_history(
     group_id: int,
     task_id: int,
