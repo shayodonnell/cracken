@@ -33,8 +33,7 @@ app.include_router(
 app.include_router(
     completions.router,
     prefix=f"{settings.API_V1_PREFIX}/groups/{{group_id}}/completions",
-    tags=["completions"]
-
+    tags=["Completions"]
 )
 
 
