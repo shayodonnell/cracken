@@ -42,7 +42,6 @@ A FastAPI-based backend for managing household chores and task rotation among ho
 3. **Install dependencies**
    ```bash
    pip install -r requirements.txt
-   pip install email-validator  # Required for Pydantic EmailStr
    ```
 
 4. **Start PostgreSQL with Docker**
